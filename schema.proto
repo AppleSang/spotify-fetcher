@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package com.spotify.canvazcache;
+
+message EntityCanvazResponse {
+  repeated Canvaz canvases = 1;
+  int64 ttlInSeconds = 2;
+
+  message Canvaz {
+    string id = 1;
+    string url = 2;
+    string fileId = 3;
+    int32 type = 4;
+    string entityUri = 5;
+  }
+}
