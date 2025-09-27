@@ -189,7 +189,9 @@ app.get("/lyric", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch lyrics" });
   }
 });
-
+app.use((req, res) => {
+  res.redirect("https://applesang.github.io/flowapple/");
+});
 // ==========================
 // Local dev
 // ==========================
