@@ -51,10 +51,18 @@ const EntityCanvazResponse = root.lookupType(
 // Biến toàn cục
 // ==========================
 let spotifyAccessToken = null;
+let totalRequests = 0;
+let failedRequests = 0;
 
 // ==========================
 // Helper
 // ==========================
+function updateTerminalTitle() {
+  process.stdout.write(
+    `\x1b]0;Spotify Fetcher | ✅ ${totalRequests} | ❌ ${failedRequests}\x07`
+  );
+}
+
 function encodeEntityCanvazRequest(trackUri) {
   const CanvazRequest = new protobuf.Type("EntityCanvazRequest").add(
     new protobuf.Field("uris", 1, "string", "repeated")
@@ -71,6 +79,7 @@ async function refreshAccessToken() {
     const cookie = process.env.SP_DC;
     if (!cookie) {
       console.error("❌ Thiếu SP_DC trong environment variable");
+      spotifyAccessToken = null;
       return;
     }
 
@@ -81,24 +90,31 @@ async function refreshAccessToken() {
     spotifyAccessToken = res.data.accessToken;
     console.log("✅ Access token refreshed:", spotifyAccessToken.slice(0, 15));
   } catch (err) {
-    console.error("❌ Failed to refresh token:", err.message);
+    spotifyAccessToken = null;
+    console.error("❌ Failed to refresh token:", err.response?.status || err.message);
   }
 }
 
-setInterval(refreshAccessToken, 1000 * 60 * 10); // 10 phút
+// gọi 1 lần khi khởi động
 refreshAccessToken();
+// làm mới mỗi 10 phút
+setInterval(refreshAccessToken, 1000 * 60 * 10);
 
 // ==========================
 // API route: /canvas
 // ==========================
 app.get("/canvas", async (req, res) => {
+  totalRequests++;
+  updateTerminalTitle();
   res.setHeader("Access-Control-Allow-Origin", "*");
 
   try {
     const { trackId } = req.query;
     if (!trackId) return res.status(400).json({ error: "Missing trackId" });
     if (!spotifyAccessToken)
-      return res.status(500).json({ error: "Access token not ready" });
+      return res
+        .status(500)
+        .json({ error: "Access token not ready (SP_DC invalid/expired?)" });
 
     const trackUri = `spotify:track:${trackId}`;
     const body = encodeEntityCanvazRequest(trackUri);
@@ -136,11 +152,14 @@ app.get("/canvas", async (req, res) => {
       return res.redirect(albumArt);
     }
 
+    // stream canvas video trực tiếp
     const video = await axios.get(canvasUrl, { responseType: "stream" });
     res.setHeader("Content-Type", "video/mp4");
     res.setHeader("Cache-Control", "no-store");
     video.data.pipe(res);
   } catch (err) {
+    failedRequests++;
+    updateTerminalTitle();
     console.error("❌ Canvas error:", err.message);
     res.status(500).json({ error: err.message });
   }
@@ -150,13 +169,25 @@ app.get("/canvas", async (req, res) => {
 // API route: /lyric
 // ==========================
 app.get("/lyric", async (req, res) => {
+  totalRequests++;
+  updateTerminalTitle();
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
 
   const { trackId } = req.query;
-  if (!trackId) return res.status(400).json({ error: "Missing trackId" });
-  if (!spotifyAccessToken)
-    return res.status(500).json({ error: "Access token not ready" });
+  if (!trackId) {
+    failedRequests++;
+    updateTerminalTitle();
+    return res.status(400).json({ error: "Missing trackId" });
+  }
+
+  if (!spotifyAccessToken) {
+    failedRequests++;
+    updateTerminalTitle();
+    return res
+      .status(500)
+      .json({ error: "Access token not ready (SP_DC invalid/expired?)" });
+  }
 
   try {
     const response = await axios.get(
@@ -185,15 +216,22 @@ app.get("/lyric", async (req, res) => {
 
     return res.json({ trackId, lyrics });
   } catch (err) {
+    failedRequests++;
+    updateTerminalTitle();
     console.error("❌ Lyric error:", err.message);
     res.status(500).json({ error: "Failed to fetch lyrics" });
   }
 });
+
+// ==========================
+// Redirect fallback
+// ==========================
 app.use((req, res) => {
   res.redirect("https://applesang.github.io/flowapple/");
 });
+
 // ==========================
-// Local dev
+// Start server (local only)
 // ==========================
 if (require.main === module) {
   app.listen(PORT, () => {
