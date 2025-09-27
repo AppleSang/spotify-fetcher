@@ -7,7 +7,16 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================
-// Proto schema (tích hợp thẳng)
+// Debug SP_DC
+// ==========================
+if (!process.env.SP_DC) {
+  console.error("❌ Không tìm thấy SP_DC trong environment variables");
+} else {
+  console.log("🔑 SP_DC đã load, độ dài:", process.env.SP_DC.length);
+}
+
+// ==========================
+// Proto schema (tích hợp)
 // ==========================
 const root = protobuf.Root.fromJSON({
   nested: {
@@ -59,7 +68,7 @@ let failedRequests = 0;
 // ==========================
 function updateTerminalTitle() {
   process.stdout.write(
-    `\x1b]0;Spotify Fetcher | ✅ ${totalRequests} | ❌ ${failedRequests}\x07`
+    `\x1b]0;Spotify Proxy | ✅ ${totalRequests} | ❌ ${failedRequests}\x07`
   );
 }
 
@@ -78,10 +87,12 @@ async function refreshAccessToken() {
   try {
     const cookie = process.env.SP_DC;
     if (!cookie) {
-      console.error("❌ Thiếu SP_DC trong environment variable");
+      console.error("❌ Thiếu SP_DC (env chưa set)");
       spotifyAccessToken = null;
       return;
     }
+
+    console.log("🔄 Refreshing access token...");
 
     const res = await axios.get("https://open.spotify.com/get_access_token", {
       headers: { Cookie: `sp_dc=${cookie}` },
@@ -91,14 +102,17 @@ async function refreshAccessToken() {
     console.log("✅ Access token refreshed:", spotifyAccessToken.slice(0, 15));
   } catch (err) {
     spotifyAccessToken = null;
-    console.error("❌ Failed to refresh token:", err.response?.status || err.message);
+    console.error(
+      "❌ Failed to refresh token:",
+      err.response?.status,
+      err.response?.statusText,
+      err.message
+    );
   }
 }
 
-// gọi 1 lần khi khởi động
+setInterval(refreshAccessToken, 1000 * 60 * 10); // 10 phút
 refreshAccessToken();
-// làm mới mỗi 10 phút
-setInterval(refreshAccessToken, 1000 * 60 * 10);
 
 // ==========================
 // API route: /canvas
@@ -112,9 +126,7 @@ app.get("/canvas", async (req, res) => {
     const { trackId } = req.query;
     if (!trackId) return res.status(400).json({ error: "Missing trackId" });
     if (!spotifyAccessToken)
-      return res
-        .status(500)
-        .json({ error: "Access token not ready (SP_DC invalid/expired?)" });
+      return res.status(500).json({ error: "Access token not ready" });
 
     const trackUri = `spotify:track:${trackId}`;
     const body = encodeEntityCanvazRequest(trackUri);
@@ -142,6 +154,7 @@ app.get("/canvas", async (req, res) => {
     }
 
     if (!canvasUrl) {
+      // fallback: lấy album art
       const meta = await axios.get(
         `https://api.spotify.com/v1/tracks/${trackId}`,
         { headers: { Authorization: `Bearer ${spotifyAccessToken}` } }
@@ -152,7 +165,7 @@ app.get("/canvas", async (req, res) => {
       return res.redirect(albumArt);
     }
 
-    // stream canvas video trực tiếp
+    // stream canvas video trực tiếp về client
     const video = await axios.get(canvasUrl, { responseType: "stream" });
     res.setHeader("Content-Type", "video/mp4");
     res.setHeader("Cache-Control", "no-store");
@@ -184,9 +197,7 @@ app.get("/lyric", async (req, res) => {
   if (!spotifyAccessToken) {
     failedRequests++;
     updateTerminalTitle();
-    return res
-      .status(500)
-      .json({ error: "Access token not ready (SP_DC invalid/expired?)" });
+    return res.status(500).json({ error: "Access token not ready" });
   }
 
   try {
