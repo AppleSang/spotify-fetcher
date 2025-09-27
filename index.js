@@ -2,7 +2,6 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const protobuf = require("protobufjs");
-const OTPAuth = require("otpauth");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -52,20 +51,11 @@ const EntityCanvazResponse = root.lookupType(
 // Biến toàn cục
 // ==========================
 let spotifyAccessToken = null;
-let totalRequests = 0;
-let failedRequests = 0;
 
 // ==========================
 // Helper
 // ==========================
-function updateTerminalTitle() {
-  process.stdout.write(
-    `\x1b]0;Spotify Fetcher | ✅ ${totalRequests} | ❌ ${failedRequests}\x07`
-  );
-}
-
 function encodeEntityCanvazRequest(trackUri) {
-  // request tối giản (theo protobuf structure của Spotify)
   const CanvazRequest = new protobuf.Type("EntityCanvazRequest").add(
     new protobuf.Field("uris", 1, "string", "repeated")
   );
@@ -99,11 +89,9 @@ setInterval(refreshAccessToken, 1000 * 60 * 10); // 10 phút
 refreshAccessToken();
 
 // ==========================
-// API route: /spotify/canvas
+// API route: /canvas
 // ==========================
-app.get("/spotify/canvas", async (req, res) => {
-  totalRequests++;
-  updateTerminalTitle();
+app.get("/canvas", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
 
   try {
@@ -138,7 +126,6 @@ app.get("/spotify/canvas", async (req, res) => {
     }
 
     if (!canvasUrl) {
-      // fallback: lấy album art
       const meta = await axios.get(
         `https://api.spotify.com/v1/tracks/${trackId}`,
         { headers: { Authorization: `Bearer ${spotifyAccessToken}` } }
@@ -149,21 +136,62 @@ app.get("/spotify/canvas", async (req, res) => {
       return res.redirect(albumArt);
     }
 
-    // 🔥 stream canvas video trực tiếp về client
     const video = await axios.get(canvasUrl, { responseType: "stream" });
     res.setHeader("Content-Type", "video/mp4");
     res.setHeader("Cache-Control", "no-store");
     video.data.pipe(res);
   } catch (err) {
-    failedRequests++;
-    updateTerminalTitle();
     console.error("❌ Canvas error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ==========================
-// Start server (local only)
+// API route: /lyric
+// ==========================
+app.get("/lyric", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+
+  const { trackId } = req.query;
+  if (!trackId) return res.status(400).json({ error: "Missing trackId" });
+  if (!spotifyAccessToken)
+    return res.status(500).json({ error: "Access token not ready" });
+
+  try {
+    const response = await axios.get(
+      `https://spclient.wg.spotify.com/color-lyrics/v2/track/${trackId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${spotifyAccessToken}`,
+          "App-Platform": "WebPlayer",
+          "User-Agent": "Mozilla/5.0",
+        },
+        params: {
+          format: "json",
+          market: "from_token",
+        },
+      }
+    );
+
+    const lines = response.data?.lyrics?.lines;
+    if (!lines?.length)
+      return res.status(404).json({ error: "No lyrics found" });
+
+    const lyrics = lines.map((line) => ({
+      startTimeMs: line.startTimeMs,
+      words: line.words,
+    }));
+
+    return res.json({ trackId, lyrics });
+  } catch (err) {
+    console.error("❌ Lyric error:", err.message);
+    res.status(500).json({ error: "Failed to fetch lyrics" });
+  }
+});
+
+// ==========================
+// Local dev
 // ==========================
 if (require.main === module) {
   app.listen(PORT, () => {
