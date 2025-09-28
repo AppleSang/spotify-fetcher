@@ -1,7 +1,7 @@
 import express from "express";
 import axios from "axios";
 import protobuf from "protobufjs";
-import OTPAuth from "otpauth";
+import * as OTPAuth from "otpauth";
 
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
