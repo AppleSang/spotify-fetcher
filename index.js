@@ -1,13 +1,9 @@
-import express from "express";
 import axios from "axios";
 import protobuf from "protobufjs";
-import * as OTPAuth from "otpauth";
+import tmp from "tmp";
+import fs from "fs";
+import OTPAuth from "otpauth";
 
-if (process.env.NODE_ENV !== "production") {
-  require("dotenv").config();
-}
-
-// ==== Auth Config ====
 const SP_DC = process.env.SP_DC;
 const SECRETS_URL =
   "https://raw.githubusercontent.com/Thereallo1026/spotify-secrets/refs/heads/main/secrets/secretDict.json";
@@ -17,7 +13,18 @@ let currentTotpVersion = null;
 let lastFetchTime = 0;
 const FETCH_INTERVAL = 60 * 60 * 1000;
 
-// ==== TOTP Token Handler ====
+let EntityCanvazResponse;
+let spotifyAccessToken = "";
+
+// ==== Load protobuf schema (once) ====
+(async () => {
+  const root = await protobuf.load("schema.proto");
+  EntityCanvazResponse = root.lookupType(
+    "com.spotify.canvazcache.EntityCanvazResponse"
+  );
+})();
+
+// ==== TOTP ====
 async function initializeTOTPSecrets() {
   try {
     await updateTOTPSecrets();
@@ -25,6 +32,7 @@ async function initializeTOTPSecrets() {
     useFallbackSecret();
   }
 }
+
 async function updateTOTPSecrets() {
   const now = Date.now();
   if (now - lastFetchTime < FETCH_INTERVAL) return;
@@ -51,6 +59,7 @@ async function updateTOTPSecrets() {
     console.log(`✅ TOTP updated to version ${newestVersion}`);
   }
 }
+
 function useFallbackSecret() {
   const fallbackData = [
     99, 111, 47, 88, 49, 56, 118, 65, 52, 67, 50, 104, 117, 101, 55, 94, 95, 75,
@@ -68,6 +77,7 @@ function useFallbackSecret() {
   currentTotpVersion = "19";
   console.log("⚠️ Using fallback secret");
 }
+
 async function getToken(reason = "init", productType = "mobile-web-player") {
   if (!currentTotp) await initializeTOTPSecrets();
   const local = Date.now();
@@ -82,6 +92,7 @@ async function getToken(reason = "init", productType = "mobile-web-player") {
     })
     .then((res) => Number(res.data.serverTime) * 1000)
     .catch(() => local);
+
   const payload = {
     reason,
     productType,
@@ -89,10 +100,10 @@ async function getToken(reason = "init", productType = "mobile-web-player") {
     totpVer: currentTotpVersion || "19",
     totpServer: currentTotp.generate({ timestamp: server }),
   };
+
   const url = new URL("https://open.spotify.com/api/token");
-  Object.entries(payload).forEach(([k, v]) =>
-    url.searchParams.append(k, v)
-  );
+  Object.entries(payload).forEach(([k, v]) => url.searchParams.append(k, v));
+
   const res = await axios.get(url.toString(), {
     headers: {
       "User-Agent": "Mozilla/5.0",
@@ -104,36 +115,6 @@ async function getToken(reason = "init", productType = "mobile-web-player") {
   return res.data?.accessToken;
 }
 
-// ==== App Config ====
-const app = express();
-
-// Nhúng schema trực tiếp
-const protoSchema = `
-syntax = "proto3";
-
-package com.spotify.canvazcache;
-
-message EntityCanvazResponse {
-  repeated Canvaz canvases = 1;
-  int64 ttlInSeconds = 2;
-
-  message Canvaz {
-    string id = 1;
-    string url = 2;
-    string fileId = 3;
-    int32 type = 4;
-    string entityUri = 5;
-  }
-}
-`;
-
-const root = protobuf.parse(protoSchema).root;
-const EntityCanvazResponse = root.lookupType(
-  "com.spotify.canvazcache.EntityCanvazResponse"
-);
-
-let spotifyAccessToken = "";
-
 async function refreshSpotifyAccessToken() {
   try {
     spotifyAccessToken = await getToken("canvas-lyric");
@@ -142,8 +123,6 @@ async function refreshSpotifyAccessToken() {
     console.error("❌ Failed to get token:", err.message);
   }
 }
-refreshSpotifyAccessToken();
-setInterval(refreshSpotifyAccessToken, 60000);
 
 // ==== Encode Track URI ====
 function encodeEntityCanvazRequest(trackUri) {
@@ -157,12 +136,17 @@ function encodeEntityCanvazRequest(trackUri) {
   ]);
 }
 
-// ==== /spotify/canvas ====
-app.get("/canvas", async (req, res) => {
-  try {
-    const { trackId } = req.query;
-    if (!trackId)
-      return res.status(400).json({ error: "Missing trackId" });
+// ==== API Handler cho Vercel ====
+export default async function handler(req, res) {
+  const { pathname, searchParams } = new URL(req.url, `http://${req.headers.host}`);
+
+  // Refresh token nếu chưa có
+  if (!spotifyAccessToken) await refreshSpotifyAccessToken();
+
+  // /api/spotify/canvas?trackId=...
+  if (pathname.endsWith("/canvas")) {
+    const trackId = searchParams.get("trackId");
+    if (!trackId) return res.status(400).json({ error: "Missing trackId" });
     if (!spotifyAccessToken)
       return res.status(500).json({ error: "Access token not ready" });
 
@@ -182,9 +166,7 @@ app.get("/canvas", async (req, res) => {
           responseType: "arraybuffer",
         }
       );
-      const decoded = EntityCanvazResponse.decode(
-        new Uint8Array(response.data)
-      );
+      const decoded = EntityCanvazResponse.decode(new Uint8Array(response.data));
       const urls = decoded.canvases.map((c) => c.url).filter(Boolean);
       canvasUrl = urls[0] || null;
     } catch {
@@ -199,57 +181,51 @@ app.get("/canvas", async (req, res) => {
         }
       );
       const albumArt = meta.data.album?.images?.[0]?.url;
-      if (!albumArt)
-        return res.status(404).json({ error: "No canvas or album art" });
+      if (!albumArt) return res.status(404).json({ error: "No canvas or album art" });
       return res.redirect(albumArt);
     }
 
-    res.redirect(canvasUrl);
-  } catch (err) {
-    console.error("❌ Canvas error:", err.message);
-    res.status(500).json({ error: err.message });
+    // Trả về link gốc thay vì tải xuống file tmp (Vercel không cho ghi file)
+    return res.redirect(canvasUrl);
   }
-});
 
-// ==== /spotify/lyric ====
-app.get("/lyric", async (req, res) => {
-  try {
-    const { trackId } = req.query;
-    if (!trackId)
-      return res.status(400).json({ error: "Missing trackId" });
+  // /api/spotify/lyric?trackId=...
+  if (pathname.endsWith("/lyric")) {
+    const trackId = searchParams.get("trackId");
+    if (!trackId) return res.status(400).json({ error: "Missing trackId" });
     if (!spotifyAccessToken)
       return res.status(500).json({ error: "Access token not ready" });
 
-    const response = await axios.get(
-      `https://spclient.wg.spotify.com/color-lyrics/v2/track/${trackId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${spotifyAccessToken}`,
-          "App-Platform": "WebPlayer",
-          "User-Agent": "Mozilla/5.0",
-        },
-        params: {
-          format: "json",
-          market: "from_token",
-        },
-      }
-    );
+    try {
+      const response = await axios.get(
+        `https://spclient.wg.spotify.com/color-lyrics/v2/track/${trackId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${spotifyAccessToken}`,
+            "App-Platform": "WebPlayer",
+            "User-Agent": "Mozilla/5.0",
+          },
+          params: {
+            format: "json",
+            market: "from_token",
+          },
+        }
+      );
 
-    const lines = response.data?.lyrics?.lines;
-    if (!lines?.length)
-      return res.status(404).json({ error: "No lyrics found" });
+      const lines = response.data?.lyrics?.lines;
+      if (!lines?.length) return res.status(404).json({ error: "No lyrics found" });
 
-    const lyrics = lines.map((line) => ({
-      startTimeMs: line.startTimeMs,
-      words: line.words,
-    }));
+      const lyrics = lines.map((line) => ({
+        startTimeMs: line.startTimeMs,
+        words: line.words,
+      }));
 
-    return res.json({ trackId, lyrics });
-  } catch (err) {
-    console.error("❌ Lyric error:", err.message);
-    res.status(500).json({ error: "Failed to fetch lyrics" });
+      return res.json({ trackId, lyrics });
+    } catch (err) {
+      console.error("❌ Lyric error:", err.message);
+      return res.status(500).json({ error: "Failed to fetch lyrics" });
+    }
   }
-});
 
-// ==== Export for Vercel ====
-export default app;
+  return res.status(404).json({ error: "Invalid endpoint" });
+}
