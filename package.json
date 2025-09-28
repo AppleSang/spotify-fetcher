@@ -1,23 +1,23 @@
 {
-  "name": "spotify-proxy",
+  "name": "spotify-canvaz-proxy",
   "version": "1.0.0",
-  "description": "Spotify Canvas & Lyrics proxy for Vercel",
+  "description": "Proxy API to fetch Spotify Canvaz + Lyrics with protobuf decoding",
   "main": "index.js",
+  "type": "module",
   "scripts": {
+    "dev": "node index.js",
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "vercel-build": "echo 'No build step required'"
   },
   "dependencies": {
     "axios": "^1.7.7",
     "express": "^4.19.2",
     "protobufjs": "^7.2.5",
-    "otpauth": "^9.1.3"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.7"
+    "otpauth": "^9.1.3",
+    "dotenv": "^17.2.1"
   },
   "engines": {
-    "node": ">=22.x"
+    "node": ">=18"
   },
   "license": "MIT"
 }
