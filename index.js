@@ -2,7 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import axios from 'axios';
 import protobuf from 'protobufjs';
-import OTPAuth from 'otpauth';
+import * as OTPAuth from 'otpauth';
+
 
 // ==== Config ====
 const SP_DC = process.env.SP_DC;
