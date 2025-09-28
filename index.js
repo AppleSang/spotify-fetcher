@@ -207,5 +207,11 @@ app.get("/lyric", async (req,res)=>{
   }
 });
 
+// ==== Catch-all redirect ====
+app.use((req,res)=>{
+  console.log("🌐 Unknown request path, redirecting to flowapple:", req.originalUrl);
+  res.redirect("https://applesang.github.io/flowapple");
+});
+
 // ==== Start Server ====
 app.listen(PORT, ()=>console.log(`🎧 Server running at http://localhost:${PORT}`));
