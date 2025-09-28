@@ -5,8 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "vercel-build": "echo Build step complete"
+    "start": "node index.js"
   },
   "dependencies": {
     "axios": "^1.6.6",
