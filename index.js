@@ -22,7 +22,7 @@ export default async function handler(req, res) {
     const html = await response.text();
 
     // Tìm link Canvas thực
-    const match = html.match(/https:\/\/canvaz\.scdn\.co\/upload\/artist[^\s"']+/);
+    const match = html.match(/https:\/\/canvaz\.scdn\.co[^\s"']+/);
 
     if (match && match[0]) {
       const canvasLink = match[0];
