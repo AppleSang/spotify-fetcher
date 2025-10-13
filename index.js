@@ -1,12 +1,17 @@
 import fetch from "node-fetch";
 
-/**
- * API Route for Vercel
- * Usage: https://your-vercel-app.vercel.app/api/canvas?trackId=xxxx
- */
 export default async function handler(req, res) {
-  const { trackId } = req.query;
+  // Thêm header CORS cho mọi domain (hoặc giới hạn domain của bạn)
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
+  // Xử lý preflight request (OPTIONS)
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  const { trackId } = req.query;
   if (!trackId) {
     return res.status(400).send("❌ Missing trackId parameter.");
   }
@@ -16,13 +21,12 @@ export default async function handler(req, res) {
     const response = await fetch(targetUrl);
     const html = await response.text();
 
-    // Regex tìm link bắt đầu bằng https://canvaz.scdn.co/upload/artist
     const match = html.match(/https:\/\/canvaz\.scdn\.co\/upload\/artist[^\s"']+/);
 
     if (match && match[0]) {
       const canvasLink = match[0];
-      res.writeHead(302, { Location: canvasLink });
-      return res.end();
+      // Gửi link về dạng JSON để frontend dùng dễ hơn
+      return res.status(200).json({ canvas: canvasLink });
     } else {
       return res.status(404).send("❌ Canvas link not found for this trackId.");
     }
