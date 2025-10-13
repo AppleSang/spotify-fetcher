@@ -1,12 +1,12 @@
 import fetch from "node-fetch";
 
 export default async function handler(req, res) {
-  // Thêm header CORS cho mọi domain (hoặc giới hạn domain của bạn)
+  // Cho phép gọi từ browser (ví dụ từ GitHub Pages)
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  // Xử lý preflight request (OPTIONS)
+  // Nếu là preflight (OPTIONS), trả OK
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -21,12 +21,14 @@ export default async function handler(req, res) {
     const response = await fetch(targetUrl);
     const html = await response.text();
 
+    // Tìm link Canvas thực
     const match = html.match(/https:\/\/canvaz\.scdn\.co\/upload\/artist[^\s"']+/);
 
     if (match && match[0]) {
       const canvasLink = match[0];
-      // Gửi link về dạng JSON để frontend dùng dễ hơn
-      return res.status(200).json({ canvas: canvasLink });
+      // Redirect người dùng sang link Canvas
+      res.writeHead(302, { Location: canvasLink });
+      return res.end();
     } else {
       return res.status(404).send("❌ Canvas link not found for this trackId.");
     }
