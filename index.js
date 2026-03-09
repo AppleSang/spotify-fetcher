@@ -6,7 +6,7 @@ import * as OTPAuth from 'otpauth';
 
 // ==== Config ====
 const SP_DC = process.env.SP_DC;
-const SECRETS_URL = "https://github.com/xyloflake/spot-secrets-go/blob/main/secrets/secretDict.json?raw=true";
+const SECRETS_URL = "https://raw.githubusercontent.com/xyloflake/spot-secrets-go/refs/heads/main/secrets/secretDict.json";
 const PORT = process.env.PORT || 3000;
 
 let currentTotp = null;
