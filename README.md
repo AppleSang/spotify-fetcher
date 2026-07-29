@@ -1,4 +1,5 @@
-# Spotify Canvas & Lyrics Fetcher
+# <p align=center> Spotify Canvas & Lyrics Fetcher</p>
+> English is [here](https://github.com/AppleSang/spotify-fetcher#-english)
 
 ## 🇻🇳 Tiếng Việt
 
